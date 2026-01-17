@@ -1,8 +1,9 @@
 runpod>=1.7.0
-torch==2.2.0
-torchvision==0.17.0
+torch==2.1.0
+torchvision==0.16.0
 opencv-python-headless
-numpy
+numpy<2.0.0
 Pillow
-modelscope[cv]>=1.9.0
+modelscope
+timm
 requests
