@@ -3,16 +3,23 @@ import base64
 import tempfile
 import os
 import cv2
-import requests
+import numpy as np
 from PIL import Image
 from io import BytesIO
-from modelscope.pipelines import pipeline
-from modelscope.utils.constant import Tasks
-from modelscope.outputs import OutputKeys
+import requests
+import torch
+
+import sys
+sys.path.insert(0, '/app/ddcolor')
+
+from inference.colorization_pipeline import ImageColorizationPipeline
 
 print("Loading DDColor model...")
-colorizer = pipeline(Tasks.image_colorization, model='damo/cv_ddcolor_image-colorization')
-print("DDColor model loaded!")
+colorizer = ImageColorizationPipeline(
+    model_path='/app/models/ddcolor_modelscope.pth',
+    input_size=512
+)
+print("DDColor loaded!")
 
 def handler(event):
     try:
@@ -20,26 +27,27 @@ def handler(event):
         img_data = inp.get('image')
         input_type = inp.get('input_type', 'base64')
         
-        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
-            if input_type == 'url':
-                r = requests.get(img_data, timeout=60)
-                img = Image.open(BytesIO(r.content)).convert('RGB')
-                img.save(tmp.name)
-            else:
-                img_bytes = base64.b64decode(img_data)
-                with open(tmp.name, 'wb') as f:
-                    f.write(img_bytes)
-            
-            result = colorizer(tmp.name)
-            colorized = result[OutputKeys.OUTPUT_IMG]
-            
-            # Convert BGR to RGB
-            colorized_rgb = cv2.cvtColor(colorized, cv2.COLOR_BGR2RGB)
-            _, buf = cv2.imencode('.png', colorized_rgb)
-            
-            os.unlink(tmp.name)
-            return {"image": base64.b64encode(buf).decode('utf-8')}
+        # Load image
+        if input_type == 'url':
+            r = requests.get(img_data, timeout=60)
+            img = Image.open(BytesIO(r.content)).convert('RGB')
+        else:
+            img_bytes = base64.b64decode(img_data)
+            img = Image.open(BytesIO(img_bytes)).convert('RGB')
+        
+        # Convert to numpy
+        img_np = np.array(img)
+        
+        # Colorize
+        result = colorizer.process(img_np)
+        
+        # Encode result
+        _, buf = cv2.imencode('.png', cv2.cvtColor(result, cv2.COLOR_RGB2BGR))
+        b64 = base64.b64encode(buf).decode('utf-8')
+        
+        return {"image": b64}
     except Exception as e:
-        return {"error": str(e)}
+        import traceback
+        return {"error": str(e), "trace": traceback.format_exc()}
 
 runpod.serverless.start({"handler": handler})
